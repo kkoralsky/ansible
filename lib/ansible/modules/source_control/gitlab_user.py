@@ -79,6 +79,8 @@ options:
   gpgkey:
     description:
       - ASCII armored GPG public key
+    type: str
+    version_added: "2.8"
   group:
     description:
       - Id or Full path of parent group in the form of group/name
