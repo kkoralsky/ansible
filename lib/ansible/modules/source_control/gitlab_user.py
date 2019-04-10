@@ -76,6 +76,9 @@ options:
     description:
       - The ssh key itself.
     type: str
+  gpgkey:
+    description:
+      - ASCII armored GPG public key
   group:
     description:
       - Id or Full path of parent group in the form of group/name
@@ -172,6 +175,8 @@ user:
   type: dict
 '''
 
+import re
+
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils._text import to_native
 
@@ -223,6 +228,10 @@ class GitLabUser(object):
                 'name': options['sshkey_name'],
                 'file': options['sshkey_file']})
 
+        # Add gpg key
+        if options['gpgkey']:
+            changed = changed or self.addGpgKeyToUser(user, options['gpgkey'])
+
         # Assign group
         if options['group_path']:
             changed = changed or self.assignUserToGroup(user, options['group_path'], options['access_level'])
@@ -272,6 +281,38 @@ class GitLabUser(object):
                     'key': sshkey['file']})
             except gitlab.exceptions.GitlabCreateError as e:
                 self._module.fail_json(msg="Failed to assign sshkey to user: %s" % to_native(e))
+            return True
+        return False
+
+    @staticmethod
+    def _sanitizeGpgKey(gpg_key):
+        gpg_key = re.sub('-----.+-----', '', gpg_key)
+        return re.sub(r'\s', '', gpg_key)
+
+    '''
+    @param user User object
+    @param gpg_key Armored GPG public key
+    '''
+    def gpgKeyExists(self, user, gpg_key):
+        sanitized_gpg_key_list = [self._sanitizeGpgKey(k.attributes['key'])
+                                  for k in user.gpgkeys.list()]
+
+        return self._sanitizeGpgKey(gpg_key) in sanitized_gpg_key_list
+
+    '''
+    @param user User object
+    @param gpg_key Armored GPG public key
+    '''
+    def addGpgKeyToUser(self, user, gpg_key):
+        if not self.gpgKeyExists(user, gpg_key):
+            if not self._module.check_mode:
+                return True
+            try:
+                user.gpgkeys.create(data={
+                    'key': gpg_key
+                })
+            except gitlab.exceptions.GitlabCreateError as e:
+                self._module.fail_json(msg="Failed to add GPG key to user %s" % to_native(e))
             return True
         return False
 
@@ -403,6 +444,7 @@ def main():
         email=dict(type='str', required=True),
         sshkey_name=dict(type='str'),
         sshkey_file=dict(type='str'),
+        gpgkey=dict(type='str'),
         group=dict(type='str'),
         access_level=dict(type='str', default="guest", choices=["developer", "guest", "maintainer", "master", "owner", "reporter"]),
         confirm=dict(type='bool', default=True),
@@ -423,6 +465,7 @@ def main():
     user_email = module.params['email']
     user_sshkey_name = module.params['sshkey_name']
     user_sshkey_file = module.params['sshkey_file']
+    user_gpgkey = module.params['gpgkey']
     group_path = module.params['group']
     access_level = module.params['access_level']
     confirm = module.params['confirm']
@@ -446,6 +489,7 @@ def main():
                                           "email": user_email,
                                           "sshkey_name": user_sshkey_name,
                                           "sshkey_file": user_sshkey_file,
+                                          "gpgkey": user_gpgkey,
                                           "group_path": group_path,
                                           "access_level": access_level,
                                           "confirm": confirm,
